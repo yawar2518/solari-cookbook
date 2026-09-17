@@ -20,7 +20,12 @@ const INTERNAL_SECRET = process.env.INTERNAL_API_SECRET || ''
 // Public endpoints that work without a session.
 const PUBLIC_PATHS = new Set(['waitlist', 'health'])
 
-const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-length', 'host'])
+// Headers that must not be forwarded from the upstream response. Node's fetch
+// transparently decompresses the body, so passing `content-encoding` through
+// would tell the browser to gunzip plain text (ERR_CONTENT_DECODING_FAILED).
+// `content-length` and `transfer-encoding` describe the wire format of the
+// upstream connection, not the body we re-emit, so they are dropped too.
+const STRIP_RESPONSE_HEADERS = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-length', 'content-encoding', 'host'])
 
 async function handler(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params
@@ -36,6 +41,9 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ path: string[]
   if (contentType) headers.set('content-type', contentType)
   const accept = req.headers.get('accept')
   if (accept) headers.set('accept', accept)
+  // Ask the backend for an uncompressed body so the raw bytes pass straight
+  // through without any decode/re-encode step in between.
+  headers.set('accept-encoding', 'identity')
   if (token) headers.set('authorization', `Bearer ${token}`)
   if (INTERNAL_SECRET) headers.set('x-internal-secret', INTERNAL_SECRET)
 
@@ -63,7 +71,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ path: string[]
 
   const outHeaders = new Headers()
   upstream.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) outHeaders.set(key, value)
+    if (!STRIP_RESPONSE_HEADERS.has(key.toLowerCase())) outHeaders.set(key, value)
   })
   outHeaders.set('cache-control', 'no-store')
 
