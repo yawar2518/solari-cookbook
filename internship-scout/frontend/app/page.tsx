@@ -19,7 +19,7 @@ export default async function LandingPage() {
 
       {/* Hero */}
       <section className="relative overflow-hidden bg-grid">
-        <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 pb-20 pt-16 sm:px-8 lg:grid-cols-[1fr_1.05fr] lg:pb-28 lg:pt-24">
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 pb-20 pt-16 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:pb-28 lg:pt-24">
           <div className="fade-up">
             <div className="pill pill-primary mb-5">
               <Sparkles size={12} /> fyt · find your fit · live listings
@@ -51,7 +51,7 @@ export default async function LandingPage() {
               </span>
             </div>
           </div>
-          <div className="fade-up" style={{ animationDelay: '0.15s' }}>
+          <div className="min-w-0 fade-up" style={{ animationDelay: '0.15s' }}>
             <HeroDemo />
           </div>
         </div>

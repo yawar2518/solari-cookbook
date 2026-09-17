@@ -68,7 +68,7 @@ export function HeroDemo() {
   }, [])
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <div className="card overflow-hidden p-0 shadow-glow" style={{ background: 'rgba(13,31,60,0.85)' }}>
         <div className="flex items-center gap-2 border-b border-line-soft px-4 py-2.5">
           <span className="h-2.5 w-2.5 rounded-full bg-warning/70" />
@@ -78,9 +78,9 @@ export function HeroDemo() {
           <span className="ml-auto text-[11px] text-dim">{phaseLabel(phase)}</span>
         </div>
 
-        <div className="grid gap-0 md:grid-cols-[1.05fr_1fr]">
+        <div className="grid gap-0 md:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
           {/* Left: what the user types */}
-          <div className="border-b border-line-soft p-4 md:border-b-0 md:border-r">
+          <div className="min-w-0 border-b border-line-soft p-4 md:border-b-0 md:border-r">
             <div className="eyebrow mb-2">You write</div>
             <div className="surface min-h-[150px] p-3 text-[13px] leading-relaxed text-ink-2">
               {typed}
@@ -119,7 +119,7 @@ export function HeroDemo() {
           </div>
 
           {/* Right: matches */}
-          <div className="p-4">
+          <div className="min-w-0 p-4">
             <div className="eyebrow mb-2">Ranked for you</div>
             {phase === 'results' ? (
               <div className="space-y-2">
