@@ -1,0 +1,33 @@
+# Render Blueprint — deploys the fyt backend on the Free tier.
+# Dashboard → New → Blueprint → pick this repo. Render reads this file from the repo root.
+services:
+  - type: web
+    name: fyt-api
+    runtime: python
+    plan: free
+    rootDir: internship-scout/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SOLARI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ADMIN_EMAILS
+        value: 1yawarabbas1@gmail.com
+      - key: CORS_ORIGINS
+        sync: false   # https://<your-app>.vercel.app
+      - key: INTERNAL_API_SECRET
+        generateValue: true   # copy this into Vercel as INTERNAL_API_SECRET
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-4-6
+      - key: SCRAPE_TIMEOUT_SECONDS
+        value: "300"

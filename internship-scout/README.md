@@ -17,7 +17,7 @@ A 2nd-semester student with no experience gets entry-level internships. A 7th-se
 | Database / auth / storage | Supabase (Postgres + Auth + Storage) |
 | Job scraping | Solari browser SDK (`solari_browser`) — stealth, residential proxy, captcha solving |
 | AI | Anthropic Claude (`claude-sonnet-4-6` by default, configurable) |
-| Deployment | Vercel (frontend) + Railway (backend) |
+| Deployment | Vercel (frontend) + Render (backend), both free tier |
 
 > **Note on Next.js version.** The spec named Next.js 14. The scaffold already shipped with Next.js 16 and React 19 installed, and the App Router API is the same, so we kept 16 rather than downgrading React and Tailwind. The one convention that differs: `proxy.ts` replaces `middleware.ts`.
 
@@ -116,7 +116,7 @@ update public.profiles set plan = 'pro' where email = 'someone@example.com';
 Browser ──► Next.js (Vercel)
              │  /api/backend/*  (attaches Supabase JWT + optional shared secret)
              ▼
-           FastAPI (Railway) ──► Supabase (service role)
+           FastAPI (Render)  ──► Supabase (service role)
              │                     profiles · user_profiles · job_cache · search_runs
              │                     saved_jobs · cover_letters · feedback · credit_log · llm_usage
              ├──► Anthropic Claude (parse, match, letters, CV, research)
@@ -173,22 +173,41 @@ Error responses are `{ "detail": "human-readable message" }` with proper status 
 
 ---
 
-## Deployment
+## Deployment (free tier for demo and testing)
 
-### Backend → Railway
+| Piece | Where | Cost | Notes |
+| --- | --- | --- | --- |
+| Frontend | Vercel Hobby | Free | Fluid compute allows the 300 s proxy timeout the app uses |
+| Backend | Render Free web service | Free | 750 h/month, 512 MB, spins down after 15 min idle (~1 min cold start) |
+| Database + auth + storage | Supabase Free | Free | Pauses after 7 days without activity; resume from the dashboard |
+| Keep-warm ping | UptimeRobot or cron-job.org | Free | Hit `/health` every 5–10 min so demos never hit a cold start |
+| Claude + Solari | Anthropic / Solari | Usage-based | The only real spend; a search costs roughly one Solari session + ~15k Claude tokens |
 
-1. New project → Deploy from GitHub → root directory `internship-scout/backend`.
-2. Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-3. Set every variable from `backend/.env.example`. Set `CORS_ORIGINS` to your Vercel URL and pick a long random `INTERNAL_API_SECRET`.
-4. Railway's default request timeout is fine because searches run in the background; only the proxy's `maxDuration` matters for streaming.
+### 1. Backend → Render
 
-### Frontend → Vercel
+1. Push the repo to GitHub.
+2. Render → **New → Blueprint** → select the repo. Render reads `render.yaml` from the repo root (it points at `internship-scout/backend`).
+3. Fill in the secrets it prompts for: `ANTHROPIC_API_KEY`, `SOLARI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `CORS_ORIGINS` (your Vercel URL, fill after step 2 if you don't have it yet). `INTERNAL_API_SECRET` is generated for you: copy it, you need it in Vercel.
+4. Deploy. Your API URL looks like `https://fyt-api.onrender.com`. Open `/health` and confirm `"ok": true`.
 
-1. Import the repo, root directory `internship-scout/frontend`.
-2. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `BACKEND_URL` (Railway URL), `INTERNAL_API_SECRET` (same value as backend), `NEXT_PUBLIC_SITE_URL`.
-3. Add the Vercel domain to Supabase redirect URLs (step 1.4).
+### 2. Frontend → Vercel
 
----
+1. Vercel → **Add New → Project** → import the repo. Set **Root Directory** to `internship-scout/frontend`.
+2. Environment variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `BACKEND_URL` (the Render URL), `INTERNAL_API_SECRET` (same value as Render), `NEXT_PUBLIC_SITE_URL` (your Vercel URL).
+3. Deploy. Then go back to Render and set `CORS_ORIGINS` to the Vercel URL.
+
+### 3. Supabase + Google for the new domain
+
+1. Supabase → Authentication → URL Configuration: Site URL = Vercel URL; add `https://<vercel-url>/auth/callback` to Redirect URLs.
+2. Google Cloud → your OAuth client → add the Vercel URL to Authorized JavaScript origins. The redirect URI stays the Supabase callback.
+
+### 4. Keep the backend warm
+
+UptimeRobot (free) → New monitor → HTTP(s) → `https://fyt-api.onrender.com/health` every 5 minutes. A single always-warm service uses ~720 h of the 750 h monthly allowance.
+
+### Alternative backend host: Hugging Face Spaces (Docker)
+
+More RAM (16 GB) and no card, but the Space sleeps after long inactivity and repos are public unless you make the Space private. `backend/Dockerfile` already targets it: create a Docker Space, push the `backend/` folder, add the same secrets under Settings → Variables and secrets, and use `https://<user>-<space>.hf.space` as `BACKEND_URL`.
 
 ## Operations
 
