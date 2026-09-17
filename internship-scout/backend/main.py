@@ -1,193 +1,96 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from context_parser import parse_user_context
-from scraper import scrape_all
-from matcher import match_jobs
+"""fyt API — FastAPI entry point.
+
+Existing modules (context_parser.py, scraper.py, matcher.py) are integrated,
+not rewritten. Endpoints live in routers/, cross-cutting concerns in auth.py,
+credits.py, db.py and llm.py.
+"""
+
+from __future__ import annotations
+
 import asyncio
+import logging
 import sys
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from config import settings
+from routers import admin, cover_letters, cv, feedback, jobs, profile, search
 
 if sys.platform == "win32":
-    from asyncio import ProactorEventLoop
-    loop = ProactorEventLoop()
-    asyncio.set_event_loop(loop)
-app = FastAPI(title="Internship Scout API")
+    # Playwright needs the Proactor loop on Windows. Worker threads create
+    # their own loops (see search_service._run_scraper); this covers the main one.
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("fyt")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    for problem in settings.validate():
+        log.warning("CONFIG: %s", problem)
+    log.info("fyt API ready (model=%s, cache_ttl=%sh)", settings.claude_model, settings.job_cache_ttl_hours)
+    yield
+
+
+app = FastAPI(
+    title="fyt API",
+    version="1.0.0",
+    description="Context-aware job and internship matching.",
+    lifespan=lifespan,
+    docs_url="/docs" if not settings.internal_api_secret else None,
+    redoc_url=None,
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Tailored", "Content-Disposition"],
 )
 
 
-class ContextRequest(BaseModel):
-    context: str
+@app.exception_handler(RequestValidationError)
+async def validation_handler(_: Request, exc: RequestValidationError):
+    first = exc.errors()[0] if exc.errors() else {}
+    loc = ".".join(str(p) for p in first.get("loc", []) if p != "body")
+    msg = first.get("msg", "Invalid request")
+    return JSONResponse(status_code=422, content={"detail": f"{loc}: {msg}" if loc else msg})
 
 
-class SearchRequest(BaseModel):
-    profile: dict
-    location: str = ""
-
-
-class CoverLetterRequest(BaseModel):
-    profile: dict
-    job: dict
+@app.exception_handler(Exception)
+async def unhandled_handler(_: Request, exc: Exception):
+    log.exception("Unhandled error: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Something went wrong on our side. Please try again."})
 
 
 @app.get("/")
 def root():
-    return {"status": "Internship Scout API running"}
+    return {"status": "fyt API running", "version": app.version}
 
 
-@app.post("/parse-context")
-async def parse_context(req: ContextRequest):
-    if not req.context or len(req.context.strip()) < 20:
-        raise HTTPException(status_code=400, detail="Please provide more context.")
-    try:
-        profile = parse_user_context(req.context)
-        return {"profile": profile}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/health")
+def health():
+    problems = settings.validate()
+    return {"ok": not problems, "problems": problems, "model": settings.claude_model}
 
 
-@app.post("/search-jobs")
+app.include_router(profile.router)
+app.include_router(search.router)
+app.include_router(jobs.router)
+app.include_router(cover_letters.router)
+app.include_router(cv.router)
+app.include_router(feedback.router)
+app.include_router(admin.router)
 
-async def search_jobs(req: SearchRequest):
 
-    try:
+if __name__ == "__main__":
+    import uvicorn
 
-        profile = req.profile
-
-        keywords = profile.get("search_keywords", {})
-
-
-
-        global_keywords = keywords.get("global", [])[:2]
-
-        local_keywords = keywords.get("local", [])[:1]
-
-        all_keywords = global_keywords + local_keywords
-
-
-
-        if not all_keywords:
-
-            raise HTTPException(status_code=400, detail="No search keywords in profile.")
-
-
-
-        prefs = profile.get("preferences", {})
-
-        location = ""
-
-        if prefs.get("location_type") == "remote":
-
-            location = "Remote"
-
-        elif prefs.get("city"):
-
-            location = f"{prefs['city']}, {prefs.get('country', '')}"
-
-        elif prefs.get("country"):
-
-            location = prefs["country"]
-
-
-
-        # Run scraper in a separate thread with its own event loop
-
-        import concurrent.futures
-
-
-
-        def run_scraper():
-
-            loop = asyncio.new_event_loop()
-
-            asyncio.set_event_loop(loop)
-
-            try:
-
-                return loop.run_until_complete(scrape_all(all_keywords, location))
-
-            finally:
-
-                loop.close()
-
-
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-
-            future = executor.submit(run_scraper)
-
-            jobs = future.result(timeout=120)
-
-
-
-        if not jobs:
-
-            return {"jobs": [], "message": "No jobs found. Try adjusting your profile."}
-
-
-
-        ranked_jobs = match_jobs(profile, jobs)
-
-        return {"jobs": ranked_jobs, "total": len(ranked_jobs)}
-
-
-
-    except HTTPException:
-
-        raise
-
-    except Exception as e:
-
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/cover-letter")
-async def cover_letter(req: CoverLetterRequest):
-    try:
-        from anthropic import Anthropic
-        import os
-
-        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-        profile = req.profile
-        job = req.job
-
-        prompt = f"""Write a concise, professional cover letter for this candidate applying to this job.
-
-Candidate Profile:
-{profile}
-
-Job:
-Title: {job.get('title')}
-Company: {job.get('company')}
-Location: {job.get('location')}
-Details: {job.get('snippet', '')}
-
-Matching skills: {job.get('matching_skills', [])}
-Missing skills: {job.get('missing_skills', [])}
-
-Rules:
-- 3 short paragraphs max
-- First paragraph: who they are and why this role
-- Second paragraph: 2-3 specific skills/experiences that match
-- Third paragraph: enthusiasm and call to action
-- Honest about gaps but frame them as learning opportunities
-- No fluff, no generic phrases like "I am writing to express my interest"
-- Conversational but professional tone
-- Under 250 words"""
-
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        return {"cover_letter": message.content[0].text.strip()}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

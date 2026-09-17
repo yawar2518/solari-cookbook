@@ -144,12 +144,27 @@ async def scrape_rozee(page, keyword: str, location: str) -> list[dict]:
     return jobs
 
 
+async def _launch_browser(solari):
+    """Launch a stealth session, falling back to the standard pool.
+
+    proxy and captcha are only supported on the stealth pool, so they stand or
+    fall with it. When that pool has no capacity the launch burns ~120s before
+    giving up, and previously took the whole request down with it. Falling back
+    means the sites that don't hard-block a plain session still return results.
+    """
+    try:
+        return await solari.launch(stealth=True, proxy="us", captcha=True)
+    except Exception as e:
+        print(f"[Solari] stealth launch failed ({e}); falling back to standard pool")
+        return await solari.launch()
+
+
 async def scrape_all(keywords: list[str], location: str = "") -> list[dict]:
     solari = Solari(api_key=os.environ["SOLARI_API_KEY"])
     all_jobs = []
     seen_urls = set()
 
-    browser = await solari.launch(stealth=True, proxy="us", captcha=True)
+    browser = await _launch_browser(solari)
     try:
         tasks = []
         pages = []
@@ -164,9 +179,12 @@ async def scrape_all(keywords: list[str], location: str = "") -> list[dict]:
             tasks.append(scrape_internshala(page_internshala, keyword, location))
             tasks.append(scrape_rozee(page_rozee, keyword, location))
 
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for result in results:
+            if isinstance(result, BaseException):
+                print(f"[scrape_all] a site scrape failed: {result!r}")
+                continue
             for job in result:
                 if job["url"] and job["url"] not in seen_urls:
                     seen_urls.add(job["url"])
